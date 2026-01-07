@@ -5,6 +5,7 @@ from torchvision import models
 from dataset import Dataset_
 from model import Model
 import os
+from vis import *
 from tqdm import tqdm
 from torchvision.utils import save_image, make_grid
 
@@ -21,7 +22,7 @@ def main():
     
     parser.add_argument(
         "--pretrained-model-path", 
-        default="/home/nesc-gy/nyf/code/cvhw/runs/20260105_032016_epochs_1000/checkpoint_epoch_0999.pth",
+        default="/home/nesc-gy/nyf/code/cvhw/runs/20260107_071454_epochs_1000/checkpoint_epoch_0999.pth",
         type=str, 
         help="Path to trained model checkpoint"
     )
@@ -51,35 +52,52 @@ def main():
     os.makedirs(args.infer_output_dir, exist_ok=True)
 
     cnt = 0
+    rgb_feat_list = []
+    depth_feat_list = []
+
     with torch.no_grad():
         for idx, (rgb, depth) in enumerate(tqdm(loader)):
-            if cnt % 10 != 0:
-                continue
+            # if idx % 2 != 0:
+            #     continue
+
             rgb = rgb.to(device)
-            depth = depth.to(device)
+            depth = depth.to(device) 
 
-            # 预测 depth
-            feat = model(rgb)
-            pred_depth = model.forward_with_depth(feat)
+            feat_rgb = model(rgb)
+            feat_depth = model(depth.repeat(1, 3, 1, 1)) 
 
-            # 归一化到 [0,1]，方便保存为图片
+            pred_depth = model.forward_with_depth(feat_rgb)
+            rgb_feat_list.append(feat_rgb.cpu())
+            depth_feat_list.append(feat_depth.cpu())
+
             rgb_norm = (rgb - rgb.min()) / (rgb.max() - rgb.min() + 1e-8)
             depth_norm = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
             pred_depth_norm = (pred_depth - pred_depth.min()) / (pred_depth.max() - pred_depth.min() + 1e-8)
 
-            # 如果 depth 是单通道，把通道扩展成3通道方便拼图
             if depth_norm.shape[1] == 1:
                 depth_norm = depth_norm.repeat(1, 3, 1, 1)
             if pred_depth_norm.shape[1] == 1:
                 pred_depth_norm = pred_depth_norm.repeat(1, 3, 1, 1)
 
-            # 拼接 RGB | GT Depth | Pred Depth
-            grid = torch.cat([rgb_norm, depth_norm, pred_depth_norm], dim=3)  # 水平方向拼接 (dim=3是宽)
-
-            save_path = os.path.join(args.infer_output_dir, f"comparison_{idx:04d}.png")
-            save_image(grid, save_path)
+            if idx % 50 == 0:
+                grid = torch.cat([rgb_norm, depth_norm, pred_depth_norm], dim=3)
+                save_path = os.path.join(args.infer_output_dir, f"comparison_{idx:04d}.png")
+                save_image(grid, save_path)
 
     print(f"Inference done. Comparison images saved to {args.infer_output_dir}")
+
+    # ===== loop 结束后，统一跑一次 t-SNE =====
+    feat_rgb_all = torch.cat(rgb_feat_list, dim=0)      # (N, C)
+    feat_depth_all = torch.cat(depth_feat_list, dim=0)  # (N, C)
+
+    print("Collected RGB feats:", feat_rgb_all.shape)
+    print("Collected Depth feats:", feat_depth_all.shape)
+
+    tsne_visualization(
+        feat_rgb_all,
+        feat_depth_all,
+        save_path="tsne_rgb_depth.png"
+    )
 
 
 if __name__ == "__main__":

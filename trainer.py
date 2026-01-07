@@ -99,7 +99,13 @@ class Trainer(object):
                     logits, labels = self.info_nce_loss(features)
 
                     pred_depth = self.model.forward_with_depth(rgb_features)
-                    loss = self.align_loss(logits, labels) + 200 * self.recon_loss(pred_depth, depth_images[:, 0:1, :, :])
+                    align_loss = self.align_loss(logits, labels)
+                    recon_loss = self.recon_loss(pred_depth, depth_images[:, 0:1, :, :])
+                    loss = (
+                        torch.exp(-self.model.log_sigma_align) * align_loss +
+                        torch.exp(-self.model.log_sigma_recon) * recon_loss +
+                        self.model.log_sigma_align + self.model.log_sigma_recon
+                    )
 
                 epoch_loss += loss.item()
                 num_batches += 1
